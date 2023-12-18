@@ -5,6 +5,6 @@ COPY requirements.txt LICENSE dm.py /opt/icos/
 
 WORKDIR /opt/icos/
 
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 ENTRYPOINT ["./dm.py"]

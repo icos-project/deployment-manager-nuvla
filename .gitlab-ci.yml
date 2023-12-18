@@ -1,6 +1,6 @@
 include:
   - project: 'resengit/gitlab/pipeline-helpers'
-    ref: 'main'
+    ref: main
     file: '/pipelines/docker-image.yaml'
   - project: 'resengit/gitlab/pipeline-helpers'
     ref: 'main'
