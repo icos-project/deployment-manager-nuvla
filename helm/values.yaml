@@ -1,0 +1,7 @@
+secret:
+  name: icos-agent-dm-config-secret
+
+dm:
+  name: icos-agent-dm
+  image: icos-agent/dm-nuvla:0.0.1
+  configPath: /etc/icos

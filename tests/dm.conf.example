@@ -1,0 +1,14 @@
+[keycloak]
+url = https://keycloak.dev.icos.91.109.56.214.sslip.io/realms/icos-dev/protocol/openid-connect/token
+client_id = nuvla-deployment-manager
+client_secret = secret
+grant_type = client_credentials
+
+[jm]
+url = http://10.160.3.20:30200
+
+[nuvla]
+url = https://nuvla.io
+api_key = credential/foo
+api_secret = secret
+debug = True

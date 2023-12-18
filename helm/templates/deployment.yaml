@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.dm.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.dm.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.dm.name }}
+    spec:
+      containers:
+        - name: {{ .Values.dm.name }}
+          image: {{ .Values.dm.image }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: {{ .Values.dm.configPath }}
+              readOnly: true
+      volumes:
+        - name: config-volume
+          secret:
+            secretName: {{ .Values.secret.name }}
