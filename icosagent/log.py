@@ -8,7 +8,7 @@ log_formatter = logging.Formatter(
 stdout_handler = logging.StreamHandler(sys.stdout)
 stdout_handler.setFormatter(log_formatter)
 
-logger = logging.getLogger('kafka')
+logger = logging.getLogger('icos')
 logger.addHandler(stdout_handler)
 logger.setLevel(logging.INFO)
 
