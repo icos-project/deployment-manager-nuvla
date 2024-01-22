@@ -5,3 +5,5 @@ dm:
   name: icos-agent-dm
   image: harbor.res.eng.it/icos-private/meta-kernel/deployment-manager-nuvla/main:latest
   configPath: /etc/icos
+
+imagePullSecret: harbor-cred
