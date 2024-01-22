@@ -15,6 +15,7 @@ spec:
       containers:
         - name: {{ .Values.dm.name }}
           image: {{ .Values.dm.image }}
+          imagePullPolicy: Always
           volumeMounts:
             - name: config-volume
               mountPath: {{ .Values.dm.configPath }}
