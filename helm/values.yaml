@@ -3,5 +3,5 @@ secret:
 
 dm:
   name: icos-agent-dm
-  image: icos-agent/dm-nuvla:0.0.1
+  image: harbor.res.eng.it/icos-private/meta-kernel/deployment-manager-nuvla/main:latest
   configPath: /etc/icos
