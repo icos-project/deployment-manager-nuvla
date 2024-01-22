@@ -12,7 +12,7 @@ from nuvla.api.resources.module import Module, AppBuilderK8s
 from nuvla.api.resources.deployment import Deployment
 from nuvla.api.resources.user import User
 
-from jobmngr.jm import JobManagerProxy
+from icosagent.jobmngr.jm import JobManagerProxy
 from icosagent.config.config import NuvlaConf
 from icosagent.log import get_logger
 
