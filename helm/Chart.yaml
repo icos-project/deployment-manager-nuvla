@@ -1,5 +1,6 @@
 apiVersion: v2
-name: icos-agent-dm
+name: nuvla-dm
+type: application
 description: A Helm chart for deploying ICOS Agent Deployment Manager
 version: 0.0.1
 appVersion: 0.0.1
