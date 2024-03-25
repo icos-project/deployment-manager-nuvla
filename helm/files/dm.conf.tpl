@@ -1,14 +1,14 @@
 [keycloak]
-url = {{ tpl .Values.icos.iam.authUrl . | quote }}
-client_id = {{ tpl .Values.icos.iam.clientId . | quote }}
-client_secret = {{ tpl .Values.icos.iam.clientSecret . | quote }}
+url = {{ tpl .Values.icos.iam.authUrl . }}
+client_id = {{ tpl .Values.icos.iam.clientId . }}
+client_secret = {{ tpl .Values.icos.iam.clientSecret . }}
 grant_type = client_credentials
 
 [jm]
-url = {{ tpl .Values.icos.jobManager.url . | quote }}
+url = {{ tpl .Values.icos.jobManager.url . }}
 
 [nuvla]
-url = {{ tpl .Values.nuvla.url . | quote }}
-api_key = {{ tpl .Values.nuvla.apiKey . | quote }}
-api_secret = {{ tpl .Values.nuvla.apiSecret . | quote }}
-debug = {{ tpl .Values.nuvla.debug . | quote }}
+url = {{ tpl .Values.nuvla.url . }}
+api_key = {{ tpl .Values.nuvla.apiKey . }}
+api_secret = {{ tpl .Values.nuvla.apiSecret . }}
+debug = {{ tpl .Values.nuvla.debug . }}
