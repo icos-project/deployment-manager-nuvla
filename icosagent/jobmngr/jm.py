@@ -96,7 +96,7 @@ class JobManagerProxy:
                     log.info('Authenticating with ICOS.')
                     self.token = self.auth_mngr.get_token()
                 headers = {'Authorization': f'Bearer {self.token}'}
-                log.info(f'{action} job {job_id}...')
+                log.info(f'{action} job {job_id}')
                 resp = requests.put(depl_job_url, json=data, headers=headers)
 
                 if resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR:

@@ -37,15 +37,19 @@ def main():
 
     while True:
         try:
-            log.info('Getting deployments to launch.')
+            log.info('Getting deployments to launch on Nuvla.')
             deployments = jm.deployments_to_launch()
+            if not deployments:
+                log.info('No deployments to launch on Nuvla.')
+                sleep()
+                continue
         except Exception:
             log.exception('Failed getting deployments to launch from ICOS JM.')
             sleep()
             continue
 
         try:
-            log.info('Starting deployments on Nuvla.')
+            log.info(f'Deploying {len(deployments)} deployments on Nuvla.')
             deployed = dm.deploy(deployments, jm)
             if deployed:
                 log.info('Deployed on Nuvla: %s', deployed)
