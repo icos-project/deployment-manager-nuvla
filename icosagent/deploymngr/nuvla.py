@@ -1,7 +1,6 @@
 import time
 from typing import List, Union
 from requests.exceptions import HTTPError
-import yaml
 
 from nuvla.api import Api as Nuvla, NuvlaError
 from nuvla.api.resources.base import ResourceBase
@@ -20,7 +19,7 @@ log = get_logger('dm-nuvla')
 
 
 def infra_service_creds_by_ne_id(nuvla: Nuvla, ne_id: str,
-        infra_service_type=InfraServiceK8s.subtype) -> List[dict]:
+                                 infra_service_type=InfraServiceK8s.subtype) -> List[dict]:
     """Given NuvlaEdge ID `ne_id` and the infrastructure service type
     `infra_service_type` (e.g. 'kubernetes'), finds and returns the list of
     credentials corresponding to the first infrastructure service."""
@@ -99,9 +98,8 @@ class DeploymentManagerNuvla:
         self.nuvla = nuvla_api
         self.dpl_api = Deployment(self.nuvla)
 
-    def create_app_k8s(self, manifest: str):
-        manifest_dict = yaml.safe_load(manifest)
-        app_name = f"{manifest_dict['metadata']['name']} {int(time.time())}"
+    def create_app_k8s(self, manifest: str, app_name: str):
+        app_name = f'{app_name} {int(time.time())}'
         module_api = Module(self.nuvla)
         app = AppBuilderK8s() \
             .name(app_name) \
@@ -114,8 +112,8 @@ class DeploymentManagerNuvla:
 
         return module_api.create(app, exist_ok=True)
 
-    def launch(self, dpl_manifest: str, infra_cred_id: str) -> str:
-        module_id = self.create_app_k8s(dpl_manifest)
+    def launch(self, dpl_manifest: str, app_name: str, infra_cred_id: str) -> str:
+        module_id = self.create_app_k8s(dpl_manifest, app_name)
         log.info('Created app %s', module_id)
 
         dpl = self.dpl_api.launch(module_id, infra_cred_id=infra_cred_id)
@@ -142,7 +140,7 @@ class DeploymentManagerNuvla:
     def nuvla_targets(cls, deployment: dict):
         return [t for t in deployment.get('targets', []) if cls.is_target_nuvla(t)]
 
-    def deploy(self, deployments: list, jm: JobManagerProxy) -> list:
+    def deploy_CORRECT_VERSION(self, deployments: list, jm: JobManagerProxy) -> list:
         deployed_jobs = []
         for deployment in deployments:
             if deployment.get('orchestrator') != 'nuvla':
@@ -160,10 +158,12 @@ class DeploymentManagerNuvla:
             target_to_cred = self.creds_for_targets(
                 [t['cluster_name'] for t in targets])
 
+            app_name = deployment['job_group_name']
+
             for target, cred in target_to_cred.items():
                 jm.lock_job(job_id)
                 try:
-                    depl_id = self.launch(manifest, cred)
+                    depl_id = self.launch(manifest, app_name, cred)
                     log.info(f'Launched app on {target} with: {depl_id}')
                     deployed_jobs.append({'job': job_id,
                                           'target': target,
@@ -188,3 +188,67 @@ class DeploymentManagerNuvla:
             target_to_cred[target] = creds[0]['id']
 
         return target_to_cred
+
+    # FIXME: Remove all the code below after ICOS first review.
+
+    MANIFEST_SEPARATOR = '\r\n---\r\n'
+
+    @classmethod
+    def _merge_jobs(cls, jobs: list):
+        group_ids = set()
+        for job in jobs:
+            group_ids.add(job.get('job_group_id'))
+
+        jobs_merged = {}
+        for gid in group_ids:
+            for job in jobs:
+                if job.get('job_group_id') == gid:
+                    if gid not in jobs_merged:
+                        jobs_merged[gid] = {'IDs': {job['ID']},
+                                            'job': job}
+                        del jobs_merged[gid]['job']['ID']
+                    elif job['ID'] not in jobs_merged[gid]['IDs']:
+                        jobs_merged[gid]['IDs'].add(job['ID'])
+                        jobs_merged[gid]['job']['manifest'] += \
+                            cls.MANIFEST_SEPARATOR + job['manifest']
+        return jobs_merged
+
+    def deploy(self, deployments: list, jm: JobManagerProxy) -> list:
+        deployed_jobs = []
+        log.debug(f'Jobs: {deployments}')
+        merged_jobs = self._merge_jobs(deployments)
+        log.debug(f'Merged jobs: {merged_jobs}')
+        for gid, mjob in merged_jobs.items():
+            if mjob['job'].get('orchestrator') != 'nuvla':
+                continue
+            # For IT-1 assuming deployment targets are IDs in the form
+            # nuvlabox/<UUID>. Then, for each nuvlabox/<UUID> target we will have
+            # to get the associated COE credential.
+            job = mjob['job']
+            targets = self.nuvla_targets(job)
+            if not targets:
+                continue
+
+            manifest = job['manifest']
+            app_name = job['job_group_name']
+
+            target_to_cred = self.creds_for_targets(
+                [t['cluster_name'] for t in targets])
+
+            for target, cred in target_to_cred.items():
+                for job_id in mjob['IDs']:
+                    jm.lock_job(job_id)
+                try:
+                    depl_id = self.launch(manifest, app_name, cred)
+                    log.info(f'Launched app on {target} with: {depl_id}')
+                    deployed_jobs.append({'job': gid,
+                                          'target': target,
+                                          'deployment': depl_id})
+                    for job_id in mjob['IDs']:
+                        jm.mark_job_as_completed(job_id)
+                except Exception:
+                    log.exception(f'Failed launching deployment: {gid}')
+                    for job_id in mjob['IDs']:
+                        jm.unlock_job(job_id)
+
+        return deployed_jobs

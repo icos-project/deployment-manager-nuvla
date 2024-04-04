@@ -1,0 +1,54 @@
+[
+  {
+    "ID": "1ea125ca-6887-4097-9124-593abb5188f9",
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "job_group_id": "cb05f5df-590c-4f23-87ea-57ef964c4fa5",
+    "job_group_name": "mjpeg-ffmpeg-app",
+    "type": 5,
+    "state": 1,
+    "manifest": "\r\napiVersion: v1\r\nkind: Pod\r\nmetadata:\r\n  name: mjpeg\r\n  namespace: demo-deployment-3\r\n  labels:\r\n    app.kubernetes.io/name: mjpeg\r\nspec:\r\n  containers:\r\n  - name: kceu\r\n    image: santojim/camera_to_ip:arm64\r\n    command:\r\n    - /cam2ip\r\n    args:\r\n    - --bind-addr=:8080\r\n    ports:\r\n    - containerPort: 8080\r\n      name: http\r\n    resources:\r\n      limits:\r\n        squat.ai/video: 1\r\n",
+    "targets": [
+      {
+        "cluster_name": "nuvlabox/55c7953e-2aa0-4d18-834c-b4d76d824bb9",
+        "node_name": "john-rasbpi-5-1",
+        "orchestrator": "nuvla"
+      }
+    ],
+    "locker": false,
+    "orchestrator": "nuvla",
+    "updated_at": "2024-04-03T18:55:23.761Z",
+    "resource": {
+      "job_id": "1ea125ca-6887-4097-9124-593abb5188f9",
+      "resource_uuid": "00000000-0000-0000-0000-000000000000",
+      "resource_name": "mjpeg",
+      "updatedAt": "2024-04-03T18:55:23.763Z"
+    },
+    "namespace": "demo-deployment-3"
+  },
+  {
+    "ID": "8fc23492-c8c3-4cf0-8c54-bb6feb298fe8",
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "job_group_id": "cb05f5df-590c-4f23-87ea-57ef964c4fa5",
+    "job_group_name": "mjpeg-ffmpeg-app",
+    "type": 5,
+    "state": 1,
+    "manifest": "\r\napiVersion: v1\r\nkind: Service\r\nmetadata:\r\n  name: mjpeg-service\r\n  namespace: demo-deployment-3\r\nspec:\r\n  selector:\r\n    app.kubernetes.io/name: mjpeg\r\n  ports:\r\n  - protocol: TCP\r\n    port: 8080\r\n    targetPort: 8080\r\n    nodePort: 30674\r\n  type: NodePort",
+    "targets": [
+      {
+        "cluster_name": "nuvlabox/55c7953e-2aa0-4d18-834c-b4d76d824bb9",
+        "node_name": "john-rasbpi-5-1",
+        "orchestrator": "nuvla"
+      }
+    ],
+    "locker": false,
+    "orchestrator": "nuvla",
+    "updated_at": "2024-04-03T18:55:23.761Z",
+    "resource": {
+      "job_id": "8fc23492-c8c3-4cf0-8c54-bb6feb298fe8",
+      "resource_uuid": "00000000-0000-0000-0000-000000000000",
+      "resource_name": "mjpeg-service",
+      "updatedAt": "2024-04-03T18:55:23.763Z"
+    },
+    "namespace": "demo-deployment-3"
+  }
+]
