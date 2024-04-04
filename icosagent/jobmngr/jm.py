@@ -11,8 +11,14 @@ log = get_logger('job-manager')
 
 class JobManagerProxy:
 
-    DEPLOYMENT_URI = 'jobmanager'
-    DEPLOYMENT_JOBS_URI = os.path.join(DEPLOYMENT_URI, 'jobs')
+    JOB_CREATED = 1
+    JOB_PROCESSING = 2
+    JOB_COMPLETED = 3
+    JOB_DEGRADED = 4
+
+    JM_URI = 'jobmanager'
+    JOBS_URI = os.path.join(JM_URI, 'jobs')
+    JOBS_URI_NUVLA = os.path.join(JOBS_URI, 'executable/orchestrator/nuvla')
 
     def __init__(self, config: JMConfig, auth_mngr: AuthManager):
         self.url = config.url
@@ -32,13 +38,13 @@ class JobManagerProxy:
         return False
 
     def deployments_to_launch(self) -> list:
-        depl_jobs_url = os.path.join(self.url, self.DEPLOYMENT_JOBS_URI)
+        depl_jobs_url_nuvla = os.path.join(self.url, self.JOBS_URI_NUVLA)
         try:
             for _ in range(2):  # retry logic for re-authentication
                 self._cond_authn()
                 headers = {'Authorization': f'Bearer {self.token}'}
                 log.info('Getting deployments from JM...')
-                resp = requests.get(depl_jobs_url, headers=headers)
+                resp = requests.get(depl_jobs_url_nuvla, headers=headers)
 
                 if self._is_need_reauthn(resp):
                     continue
@@ -51,7 +57,7 @@ class JobManagerProxy:
         return []
 
     def delete_job(self, job_id):
-        depl_job_url = os.path.join(self.url, self.DEPLOYMENT_JOBS_URI, job_id)
+        depl_job_url = os.path.join(self.url, self.JOBS_URI, job_id)
         try:
             for _ in range(2):  # retry logic for re-authentication
                 self._cond_authn()
@@ -67,16 +73,23 @@ class JobManagerProxy:
         except requests.exceptions.RequestException as ex:
             log.exception(ex)
 
+    def mark_job_as_completed(self, job_id):
+        data = {'ID': job_id, 'uuid': job_id,
+                'locker': True, 'state': self.JOB_COMPLETED}
+        self._put_job(job_id, data, 'Mark as completed')
+
     def lock_job(self, job_id):
-        data = {'ID': job_id, 'uuid': job_id, 'locker': True, 'state': 3}
+        data = {'ID': job_id, 'uuid': job_id,
+                'locker': True, 'state': self.JOB_PROCESSING}
         self._put_job(job_id, data, 'Lock')
 
     def unlock_job(self, job_id):
-        data = {'ID': job_id, 'uuid': job_id, 'locker': False, 'state': 3}
+        data = {'ID': job_id, 'uuid': job_id,
+                'locker': False, 'state': self.JOB_CREATED}
         self._put_job(job_id, data, 'Unlock')
 
     def _put_job(self, job_id: str, data: dict, action: str):
-        depl_job_url = os.path.join(self.url, self.DEPLOYMENT_JOBS_URI, job_id)
+        depl_job_url = os.path.join(self.url, self.JOBS_URI, job_id)
         try:
             for _ in range(2):  # retry logic for re-authentication
                 if not self.token:

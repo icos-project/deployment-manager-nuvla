@@ -145,6 +145,8 @@ class DeploymentManagerNuvla:
     def deploy(self, deployments: list, jm: JobManagerProxy) -> list:
         deployed_jobs = []
         for deployment in deployments:
+            if deployment.get('orchestrator') != 'nuvla':
+                continue
             # For IT-1 assuming deployment targets are IDs in the form
             # nuvlabox/<UUID>. Then, for each nuvlabox/<UUID> target we will have
             # to get the associated COE credential.
@@ -153,7 +155,7 @@ class DeploymentManagerNuvla:
                 continue
 
             manifest = deployment['manifest']
-            job_id = deployment['uuid']
+            job_id = deployment['ID']
 
             target_to_cred = self.creds_for_targets(
                 [t['cluster_name'] for t in targets])
@@ -166,7 +168,7 @@ class DeploymentManagerNuvla:
                     deployed_jobs.append({'job': job_id,
                                           'target': target,
                                           'deployment': depl_id})
-                    jm.delete_job(job_id)
+                    jm.mark_job_as_completed(job_id)
                 except Exception:
                     log.exception(f'Failed launching deployment: {job_id}')
                     jm.unlock_job(job_id)
