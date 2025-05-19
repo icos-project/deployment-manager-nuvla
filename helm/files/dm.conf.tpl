@@ -6,6 +6,7 @@ grant_type = client_credentials
 
 [jm]
 url = {{ tpl .Values.icos.jobManager.url . }}
+agent_id = {{ tpl .Values.icos.agent.id . }}
 
 [nuvla]
 url = {{ tpl .Values.nuvla.url . }}

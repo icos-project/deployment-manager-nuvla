@@ -6,8 +6,8 @@ from nuvla.api import Api as Nuvla, NuvlaError
 from nuvla.api.resources.base import ResourceBase
 from nuvla.api.resources.credential import Credential
 from nuvla.api.resources.infra_service import InfraService, \
-    InfraServiceGroup, InfraServiceK8s
-from nuvla.api.resources.module import Module, AppBuilderK8s
+    InfraServiceGroup, InfraServiceK8s, InfraServiceDocker
+from nuvla.api.resources.module import Module, AppBuilderK8s, AppBuilderDocker
 from nuvla.api.resources.deployment import Deployment
 from nuvla.api.resources.user import User
 
@@ -17,9 +17,29 @@ from icosagent.log import get_logger
 
 log = get_logger('dm-nuvla')
 
-
 def infra_service_creds_by_ne_id(nuvla: Nuvla, ne_id: str,
-                                 infra_service_type=InfraServiceK8s.subtype) -> List[dict]:
+                                 infra_service_type: str) -> List[dict]:
+    infra_service_types = [infra_service_type]
+    if infra_service_type == 'docker':
+        infra_service_types.append('swarm')
+    ne = NuvlaEdge(nuvla)
+    ne_resource = ne.get_select(ne_id, ['coe-list'])
+    coe_infra = {}
+    for coe in ne_resource['coe-list']:
+        if coe['coe-type'] in infra_service_types:
+            coe_infra = coe
+            break
+    if not coe_infra:
+        log.warning('No infra service found for NE: %s', ne_id)
+        return []
+
+    flt = f'parent="{coe_infra["id"]}" and method="infrastructure-service-{coe_infra["coe-type"]}"'
+    resources = nuvla.search(Credential.resource, filter=flt,
+                             select='id').resources
+    return [x.data for x in resources]
+
+def infra_service_creds_by_ne_id_old(nuvla: Nuvla, ne_id: str,
+                                 infra_service_type: str) -> List[dict]:
     """Given NuvlaEdge ID `ne_id` and the infrastructure service type
     `infra_service_type` (e.g. 'kubernetes'), finds and returns the list of
     credentials corresponding to the first infrastructure service."""
@@ -33,6 +53,9 @@ def infra_service_creds_by_ne_id(nuvla: Nuvla, ne_id: str,
     flt = f'parent="{infra_service_group}" and subtype="{infra_service_type}"'
     resources = nuvla.search(InfraService.resource, filter=flt,
                              select='id').resources
+    if not resources:
+        log.warning('No infra services found for NE: %s', ne_id)
+        return []
     # NB! We take the first one.
     infra_service_resource = resources[0].data['id']
 
@@ -79,14 +102,18 @@ class NuvlaUser(User):
 
 def nuvla_authn(config: NuvlaConf) -> Nuvla:
     if config.url:
-        nuvla = Nuvla(endpoint=config.url, debug=config.debug)
+        nuvla = Nuvla(endpoint=config.url, debug=config.debug, reauthenticate=True)
     else:
-        nuvla = Nuvla(debug=config.debug)
+        nuvla = Nuvla(debug=config.debug, reauthenticate=True)
 
     user_api = NuvlaUser(nuvla)
     user_api.login_apikey(config.api_key, config.api_secret)
 
     return nuvla
+
+
+class DeploymentFailedToStartError(Exception):
+    pass
 
 
 class DeploymentManagerNuvla:
@@ -98,22 +125,44 @@ class DeploymentManagerNuvla:
         self.nuvla = nuvla_api
         self.dpl_api = Deployment(self.nuvla)
 
-    def create_app_k8s(self, manifest: str, app_name: str):
-        app_name = f'{app_name} {int(time.time())}'
+    def create_app(self, manifest: str, app_name: str, app_type: str):
+        if app_type == InfraServiceK8s.subtype:
+            return self.create_app_k8s(manifest, app_name)
+        elif app_type == InfraServiceDocker.subtype:
+            return self.create_app_docker(manifest, app_name)
+        else:
+            raise ValueError(f'Unsupported app type: {app_type}')
+
+    def _create_app(self, manifest: str, app_name: str, builder_class):
+        # app_name = f'{app_name} {int(time.time())}'
         module_api = Module(self.nuvla)
-        app = AppBuilderK8s() \
+        app = builder_class() \
             .name(app_name) \
             .description(app_name) \
             .author(self.AUTHOR) \
             .path(f'{self.PARENT_PATH}/{app_name.lower().replace(" ", "-")}') \
             .script(manifest) \
             .build()
+        if builder_class == AppBuilderDocker:
+            app['compatibility'] = 'swarm'
         log.info(f'Create app {app}')
 
         return module_api.create(app, exist_ok=True)
 
+    def create_app_k8s(self, manifest: str, app_name: str):
+        return self._create_app(manifest, app_name, AppBuilderK8s)
+
+    def create_app_docker(self, manifest: str, app_name: str):
+        return self._create_app(manifest, app_name, AppBuilderDocker)
+
     def launch(self, dpl_manifest: str, app_name: str, infra_cred_id: str) -> str:
-        module_id = self.create_app_k8s(dpl_manifest, app_name)
+        cred_subtype = self.nuvla.get(infra_cred_id).data.get('subtype')
+        if not cred_subtype:
+            raise ValueError(f'No subtype found for credential: {infra_cred_id}') 
+        log.debug('Launching app with credential subtype: %s', cred_subtype)
+        app_type = cred_subtype.split('-')[-1]
+        log.debug('Launching app with type: %s', app_type)
+        module_id = self.create_app(dpl_manifest, app_name, app_type)
         log.info('Created app %s', module_id)
 
         dpl = self.dpl_api.launch(module_id, infra_cred_id=infra_cred_id)
@@ -121,134 +170,94 @@ class DeploymentManagerNuvla:
 
         return dpl.id
 
-    def wait_in_final_state(self, dpl_id: str):
+    def wait_in_final_state(self, dpl_id: str) -> str:
         final = [Deployment.STATE_STARTED, Deployment.STATE_ERROR]
-        while self.dpl_api.state(self.dpl_api.get(dpl_id)) not in final:
+        log.debug('Waiting for deployment %s to reach final state...', dpl_id)
+        while True:
+            state = self.dpl_api.state(self.dpl_api.get(dpl_id))
+            if state in final:
+                return state
             time.sleep(5)
 
     def terminate(self, dpl_id: str):
         self.dpl_api.terminate(dpl_id)
 
-    @staticmethod
-    def is_target_nuvla(target: dict) -> bool:
-        if 'cluster_name' not in target:
-            return False
-        return target['cluster_name'].startswith('nuvlabox/') or \
-            target['cluster_name'].startswith('infrastructure-service/')
+    def _target_cluster(self, deployment: dict) -> str:
+        target = deployment.get('clustername')
+        if not target or target == 'unknown':
+            return ''
+        return target
 
-    @classmethod
-    def nuvla_targets(cls, deployment: dict):
-        return [t for t in deployment.get('targets', []) if cls.is_target_nuvla(t)]
-
-    def deploy_CORRECT_VERSION(self, deployments: list, jm: JobManagerProxy) -> list:
-        deployed_jobs = []
-        for deployment in deployments:
-            if deployment.get('orchestrator') != 'nuvla':
-                continue
-            # For IT-1 assuming deployment targets are IDs in the form
-            # nuvlabox/<UUID>. Then, for each nuvlabox/<UUID> target we will have
-            # to get the associated COE credential.
-            targets = self.nuvla_targets(deployment)
-            if not targets:
-                continue
-
-            manifest = deployment['manifest']
-            job_id = deployment['ID']
-
-            target_to_cred = self.creds_for_targets(
-                [t['cluster_name'] for t in targets])
-
-            app_name = deployment['job_group_name']
-
-            for target, cred in target_to_cred.items():
-                jm.lock_job(job_id)
-                try:
-                    depl_id = self.launch(manifest, app_name, cred)
-                    log.info(f'Launched app on {target} with: {depl_id}')
-                    deployed_jobs.append({'job': job_id,
-                                          'target': target,
-                                          'deployment': depl_id})
-                    jm.mark_job_as_completed(job_id)
-                except Exception:
-                    log.exception(f'Failed launching deployment: {job_id}')
-                    jm.unlock_job(job_id)
-
-        return deployed_jobs
-
-    def creds_for_targets(self, targets: List[str]):
-        target_to_cred = {}
-        for target in targets:
-            creds = infra_service_creds_by_ne_id(self.nuvla, target)
-            if not creds:
-                log.error(
-                    'Failed finding credentials for deployment target: %s',
-                    target)
-                break
-            # FIXME: Find a way to select the right credential.
-            target_to_cred[target] = creds[0]['id']
-
-        return target_to_cred
-
-    # FIXME: Remove all the code below after ICOS first review.
-
-    MANIFEST_SEPARATOR = '\r\n---\r\n'
-
-    @classmethod
-    def _merge_jobs(cls, jobs: list):
-        group_ids = set()
-        for job in jobs:
-            group_ids.add(job.get('job_group_id'))
-
-        jobs_merged = {}
-        for gid in group_ids:
-            for job in jobs:
-                if job.get('job_group_id') == gid:
-                    if gid not in jobs_merged:
-                        jobs_merged[gid] = {'IDs': {job['ID']},
-                                            'job': job}
-                        del jobs_merged[gid]['job']['ID']
-                    elif job['ID'] not in jobs_merged[gid]['IDs']:
-                        jobs_merged[gid]['IDs'].add(job['ID'])
-                        jobs_merged[gid]['job']['manifest'] += \
-                            cls.MANIFEST_SEPARATOR + job['manifest']
-        return jobs_merged
+    def _creds_for_target(self, target: str, coe_type: str):
+        creds = infra_service_creds_by_ne_id(self.nuvla, target, coe_type)
+        if not creds:
+            log.error('Failed finding credentials for deployment target %s and COE type %s',
+                      target, coe_type)
+            return ''
+        return creds[0]['id']
 
     def deploy(self, deployments: list, jm: JobManagerProxy) -> list:
         deployed_jobs = []
-        log.debug(f'Jobs: {deployments}')
-        merged_jobs = self._merge_jobs(deployments)
-        log.debug(f'Merged jobs: {merged_jobs}')
-        for gid, mjob in merged_jobs.items():
-            if mjob['job'].get('orchestrator') != 'nuvla':
+        for deployment in deployments:
+            target = self._target_cluster(deployment)
+            if not target:
+                log.warning('No Nuvla target cluster found for job: %s', deployment)
                 continue
-            # For IT-1 assuming deployment targets are IDs in the form
-            # nuvlabox/<UUID>. Then, for each nuvlabox/<UUID> target we will have
-            # to get the associated COE credential.
-            job = mjob['job']
-            targets = self.nuvla_targets(job)
-            if not targets:
+            coe_type = deployment.get('type', 'unknown').lower()
+            if coe_type == 'unknown':
+                log.warning('No COE type defined for job: %s', deployment)
+                continue
+            log.debug('Deployment target: %s, COE type: %s', target, coe_type)
+            try:
+                creds = self._creds_for_target(target, coe_type)
+                if not creds:
+                    err_msg = f'Failed to find credential for target {target} and COE type {coe_type}'
+                    log.error(err_msg)
+                    continue
+            except Exception as e:
+                err_msg = f'Failed to get credentials for target {target}: {e}'
+                jm.set_job_degraded(deployment, err_msg)
+                log.error(err_msg)
                 continue
 
-            manifest = job['manifest']
-            app_name = job['job_group_name']
+            log.debug('Creds for target %s: %s', target, creds)
 
-            target_to_cred = self.creds_for_targets(
-                [t['cluster_name'] for t in targets])
+            app_name = f'{deployment["job_group_id"]}-{deployment["id"]}'
 
-            for target, cred in target_to_cred.items():
-                for job_id in mjob['IDs']:
-                    jm.lock_job(job_id)
-                try:
-                    depl_id = self.launch(manifest, app_name, cred)
-                    log.info(f'Launched app on {target} with: {depl_id}')
-                    deployed_jobs.append({'job': gid,
-                                          'target': target,
-                                          'deployment': depl_id})
-                    for job_id in mjob['IDs']:
-                        jm.mark_job_as_completed(job_id)
-                except Exception:
-                    log.exception(f'Failed launching deployment: {gid}')
-                    for job_id in mjob['IDs']:
-                        jm.unlock_job(job_id)
+            job_id = deployment['id']
+            try:
+                depl_id = self.launch(deployment['manifests'], app_name, creds)
+                state = self.wait_in_final_state(depl_id)
+                if state == Deployment.STATE_ERROR:
+                    err_msg = f'Deployment failed to start. Check deployment on Nuvla: {depl_id}'
+                    log.error(err_msg)
+                    jm.set_job_degraded(deployment, err_msg)
+                else:
+                    log.info('Launched app on %s with: %s', target, depl_id)
+                    deployed_jobs.append({'job': job_id,
+                                        'target': target,
+                                        'deployment': depl_id})
+                    jm.set_job_deployed(deployment)
+            except Exception:
+                log.exception('Failed launching deployment: %s', job_id)
 
         return deployed_jobs
+
+    def stop(self, deployments: list, jm: JobManagerProxy):
+        for deployment in deployments:
+            module_name = f'{deployment["job_group_id"]}-{deployment["id"]}'
+            log.debug('Looking for deployment with name: %s', module_name)
+            res = self.nuvla.search(Deployment.resource, filter=f'module/name="{module_name}"')
+            if not res.resources:
+                msg = f'No deployment found on Nuvla for job: {deployment["id"]}'
+                log.warning(msg)
+                jm.set_job_degraded(deployment, msg)
+                continue
+            depl_id = res.resources[0].data['id']
+            log.info('Stopping deployment %s', depl_id)
+            try:
+                self.terminate(depl_id)
+                log.info('Terminated deployment %s', depl_id)
+                jm.delete_job(deployment['id'])
+            except Exception:
+                log.exception('Failed terminating deployment: %s', depl_id)

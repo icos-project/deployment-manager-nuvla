@@ -1,6 +1,8 @@
 icos:
   jobManager:
     url: http://job-manager-url/
+  agent: 
+    id: replace-with-icos-agent-id
   iam:
     authUrl: http://iam-auth-url/
     clientId: replace-with-client-id
@@ -11,7 +13,7 @@ secret:
 
 dm:
   name: icos-agent-dm
-  image: harbor.res.eng.it/icos-private/meta-kernel/deployment-manager-nuvla/main:latest
+  image: harbor.res.eng.it/icos/meta-kernel/deployment-manager-nuvla:0.1.2
   configPath: /etc/icos
 
 #imagePullSecrets:
@@ -22,3 +24,7 @@ nuvla:
   apiKey: key
   apiSecret: secret
   debug: "True"
+
+extraCertsBundle:
+  configmapName: ""
+  configmapKey: ""

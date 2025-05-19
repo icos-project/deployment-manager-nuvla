@@ -19,6 +19,8 @@ class AuthManager:
         self.client_id = config.client_id
         self.client_secret = config.client_secret
         self.grant_type = 'client_credentials'
+        self.verify = False
+        self.timeout = 10
 
     def get_token(self):
         data = {
@@ -28,5 +30,6 @@ class AuthManager:
         }
         log.info('Getting token for %s of type %s from %s', self.client_id,
                  self.grant_type, self.url)
-        res = requests.post(self.url, data=data)
+        res = requests.post(self.url, data=data, verify=self.verify,
+                            timeout=self.timeout)
         return json.loads(res.text)['access_token']

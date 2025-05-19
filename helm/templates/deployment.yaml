@@ -12,18 +12,60 @@ spec:
       labels:
         app: {{ .Values.dm.name }}
     spec:
+
+      {{- if (tpl .Values.extraCertsBundle.configmapName .) }}
+      initContainers:
+      - args:
+        - update-ca-certificates && cp -r /etc/ssl/certs/ca-certificates.crt /output/
+        command:
+        - /bin/sh
+        - -c
+        image: {{ .Values.dm.image }}
+        name: init-ca-certs
+        volumeMounts:
+        - mountPath: /usr/local/share/ca-certificates/icos-extra-certs.crt
+          name: extra-certs-bundle
+          subPath: {{ tpl .Values.extraCertsBundle.configmapKey . }}
+        - mountPath: /output
+          name: tmp
+          readOnly: false
+      {{- end }}
+
       containers:
         - name: {{ .Values.dm.name }}
           image: {{ .Values.dm.image }}
           imagePullPolicy: Always
+          {{- if (tpl .Values.extraCertsBundle.configmapName .) }}
+          env:
+          - name: REQUESTS_CA_BUNDLE
+            value: /etc/ssl/certs/ca-certificates.crt
+          {{- end }}
+
           volumeMounts:
-            - name: config-volume
-              mountPath: {{ .Values.dm.configPath }}
-              readOnly: true
+          - name: config-volume
+            mountPath: {{ .Values.dm.configPath }}
+            readOnly: true
+          {{- if (tpl .Values.extraCertsBundle.configmapName .) }}
+          - mountPath: /etc/ssl/certs/icos-extra-certs.crt
+            name: extra-certs-bundle
+            subPath: {{ tpl .Values.extraCertsBundle.configmapKey . }}
+          - mountPath: /etc/ssl/certs/ca-certificates.crt
+            name: tmp
+            subPath: ca-certificates.crt
+          {{- end }}
       volumes:
         - name: config-volume
           secret:
             secretName: {{ .Values.secret.name }}
+        {{- if (tpl .Values.extraCertsBundle.configmapName .) }}
+        - configMap:
+            name: {{ tpl .Values.extraCertsBundle.configmapName . }}
+          name: extra-certs-bundle
+        - emptyDir: {}
+          name: tmp
+        {{- end }}
+
+
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

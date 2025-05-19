@@ -18,6 +18,7 @@ class NuvlaConf:
 
 class JobManagerConf:
     url: str
+    agent_id: str
 
 
 class DMConfig:
@@ -47,6 +48,7 @@ def nuvla_from_config(config: configparser.ConfigParser) -> NuvlaConf:
 def jm_from_config(config: configparser.ConfigParser) -> JobManagerConf:
     jm = JobManagerConf()
     jm.url = config['jm']['url']
+    jm.agent_id = config['jm']['agent_id']
     return jm
 
 

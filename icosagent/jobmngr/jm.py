@@ -11,17 +11,20 @@ log = get_logger('job-manager')
 
 class JobManagerProxy:
 
-    JOB_CREATED = 1
-    JOB_PROCESSING = 2
-    JOB_COMPLETED = 3
-    JOB_DEGRADED = 4
+    JOB_STARTING = 'starting'
+    JOB_DEPLOYED = 'deployed'
+    JOB_STOPPING = 'stopping'
+    JOB_STOPPED = 'stopped'
+    JOB_DEGRADED = 'degraded'
 
     JM_URI = 'jobmanager'
     JOBS_URI = os.path.join(JM_URI, 'jobs')
-    JOBS_URI_NUVLA = os.path.join(JOBS_URI, 'executable/orchestrator/nuvla')
+    JOBS_URI_NUVLA = os.path.join(JOBS_URI, 'executable/nuvla')
+    GROUPS_URI = os.path.join(JM_URI, 'groups')
 
     def __init__(self, config: JMConfig, auth_mngr: AuthManager):
         self.url = config.url
+        self.agent_id = config.agent_id
         self.auth_mngr = auth_mngr
         self.token = None
 
@@ -31,20 +34,20 @@ class JobManagerProxy:
             self.token = self.auth_mngr.get_token()
 
     def _is_need_reauthn(self, resp: requests.Response) -> bool:
-        if resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR:
+        if resp.status_code == HTTPStatus.UNAUTHORIZED:
             log.warning('Need to re-authenticate with ICOS.')
             self.token = None
             return True
         return False
 
-    def deployments_to_launch(self) -> list:
-        depl_jobs_url_nuvla = os.path.join(self.url, self.JOBS_URI_NUVLA)
+    def deployments_all(self) -> list:
+        depl_jobs_url = os.path.join(self.url, self.JOBS_URI_NUVLA, self.agent_id)
         try:
             for _ in range(2):  # retry logic for re-authentication
                 self._cond_authn()
                 headers = {'Authorization': f'Bearer {self.token}'}
-                log.info('Getting deployments from JM...')
-                resp = requests.get(depl_jobs_url_nuvla, headers=headers)
+                log.info('Getting all deployments from JM...')
+                resp = requests.get(depl_jobs_url, headers=headers)
 
                 if self._is_need_reauthn(resp):
                     continue
@@ -55,6 +58,24 @@ class JobManagerProxy:
             log.exception(ex)
 
         return []
+
+    @staticmethod
+    def count_deployment_states(deployments: list) -> dict:
+        states = {}
+        for j in deployments:
+            state = j['state']
+            if state not in states:
+                states[state] = 0
+            states[state] += 1
+        return states
+
+    @classmethod
+    def deployments_to_launch(cls, deployments: list) -> list:
+        return list(filter(lambda j: j['state'] == cls.JOB_STARTING, deployments))
+
+    @classmethod
+    def deployments_to_stop(cls, deployments: list) -> list:
+        return list(filter(lambda j: j['state'] == cls.JOB_STOPPING, deployments))
 
     def delete_job(self, job_id):
         depl_job_url = os.path.join(self.url, self.JOBS_URI, job_id)
@@ -73,31 +94,32 @@ class JobManagerProxy:
         except requests.exceptions.RequestException as ex:
             log.exception(ex)
 
-    def mark_job_as_completed(self, job_id):
-        data = {'ID': job_id, 'uuid': job_id,
-                'locker': True, 'state': self.JOB_COMPLETED}
-        self._put_job(job_id, data, 'Mark as completed')
+    def set_job_deployed(self, job: dict):
+        job['state'] = self.JOB_DEPLOYED
+        self._put_job(job['id'], job, 'Mark deployed')
 
-    def lock_job(self, job_id):
-        data = {'ID': job_id, 'uuid': job_id,
-                'locker': True, 'state': self.JOB_PROCESSING}
-        self._put_job(job_id, data, 'Lock')
+    def set_job_stopped(self, job: dict):
+        job['state'] = self.JOB_STOPPED
+        self._put_job(job['id'], job, 'Mark stopped')
 
-    def unlock_job(self, job_id):
-        data = {'ID': job_id, 'uuid': job_id,
-                'locker': False, 'state': self.JOB_CREATED}
-        self._put_job(job_id, data, 'Unlock')
+    def set_job_degraded(self, job: dict, error_msg: str):
+        job['state'] = 'degraded'
+        job['statusfeedback'] = error_msg
+        self._put_job(job['id'], job, 'Mark degraded')
 
     def _put_job(self, job_id: str, data: dict, action: str):
-        depl_job_url = os.path.join(self.url, self.JOBS_URI, job_id)
+        depl_job_url = os.path.join(self.url, self.JOBS_URI)
         try:
             for _ in range(2):  # retry logic for re-authentication
                 if not self.token:
                     log.info('Authenticating with ICOS.')
                     self.token = self.auth_mngr.get_token()
                 headers = {'Authorization': f'Bearer {self.token}'}
-                log.info(f'{action} job {job_id}')
-                resp = requests.put(depl_job_url, json=data, headers=headers)
+                log.info('%s job %s', action, job_id)
+                params = {'id': job_id,
+                          'orchestrator': 'nuvla'}
+                resp = requests.put(depl_job_url, json=data, headers=headers,
+                                    timeout=10, params=params)
 
                 if resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR:
                     log.warning('Re-authenticating with ICOS.')
@@ -108,3 +130,13 @@ class JobManagerProxy:
 
         except requests.exceptions.RequestException as ex:
             log.exception(ex)
+
+    def create_jobgroup(self, manifest: str):
+        self._cond_authn()
+        headers = {'Authorization': f'Bearer {self.token}'}
+        groups_url = os.path.join(self.url, self.GROUPS_URI)
+        resp = requests.post(groups_url, data=manifest, headers=headers, timeout=10)
+        print(resp.status_code)
+        if resp.status_code >= 400:
+            log.error(f'Failed creating job group: {resp.text}')
+        return resp.json()
